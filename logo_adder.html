@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>offline crop and logo tool</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    /* all comments are in lowercase as requested */
+
+    :root{
+      --bg:#0f1115;
+      --panel:#151824;
+      --ink:#e6e9ef;
+      --muted:#9aa3b2;
+      --accent:#6aa0ff;
+      --ok:#6bd17c;
+      --danger:#ff6a6a;
+      --outline:#4a5163;
+      --handle:#ffffff;
+      --overlay: rgba(0,0,0,0.45);
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji";
+      background:var(--bg);
+      color:var(--ink);
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:18px;
+      padding:24px;
+    }
+
+    .wrap{
+      width: min(960px, 100%);
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:16px;
+    }
+
+    .toolbar{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      background:var(--panel);
+      border:1px solid var(--outline);
+      border-radius:14px;
+      padding:12px 14px;
+    }
+
+    .left, .right{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+
+    .btn{
+      appearance:none; border:1px solid var(--outline); background:transparent; color:var(--ink);
+      padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:600; letter-spacing:.2px;
+    }
+    .btn:hover{border-color:var(--accent)}
+    .btn.primary{background:var(--accent); color:#0b1220; border-color:transparent}
+    .btn.ok{background:var(--ok); color:#06240d; border-color:transparent}
+    .btn:disabled{opacity:.5; cursor:not-allowed}
+
+    .toggle{
+      appearance:none; border:1px solid var(--outline); background:transparent; color:var(--ink);
+      padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:600;
+    }
+
+    .panel{
+      background:var(--panel);
+      border:1px solid var(--outline);
+      border-radius:14px;
+      padding:14px;
+    }
+
+    .drop{
+      border:1.5px dashed var(--outline);
+      border-radius:14px;
+      padding:18px;
+      text-align:center;
+      color:var(--muted);
+      transition: all .15s ease;
+    }
+    .drop.drag{border-color:var(--accent); color:var(--ink); background:rgba(106,160,255,.08)}
+    .drop input{display:none}
+    .drop .hint{font-size:.95rem}
+    .small{font-size:.9rem; color:var(--muted)}
+
+    /* stage area that shows the image and cropping box */
+    .stage{
+      position:relative;
+      background:#0b0d13;
+      border:1px solid var(--outline);
+      border-radius:14px;
+      overflow:hidden;
+      display:grid;
+      place-items:center;
+      min-height:380px;
+    }
+
+    .img-holder{
+      position:relative;
+      max-width:100%;
+      max-height:80vh;
+      display:inline-block;
+    }
+
+    .img-holder img{
+      display:block;
+      max-width:100%;
+      height:auto;
+      user-select:none;
+      -webkit-user-drag:none;
+      pointer-events:none;
+    }
+
+    /* dark overlays around crop to help the eye */
+    .veil{position:absolute; inset:0; pointer-events:none}
+    .veil::before{
+      content:"";
+      position:absolute; inset:0;
+      background:var(--overlay);
+      /* the hole will be carved dynamically with clip-path */
+      clip-path: polygon(0 0,0 100%,0 100%,0 0);
+      transition: clip-path .05s linear;
+    }
+
+    /* the crop box */
+    .crop{
+      position:absolute;
+      border:1.5px solid #ffffffcc;
+      box-shadow: 0 0 0 1px #00000055 inset;
+      cursor:move;
+    }
+    .handle{
+      position:absolute;
+      width:14px; height:14px;
+      background:var(--handle);
+      border:1px solid #00000088;
+      border-radius:3px;
+    }
+    .handle.nw{left:-7px; top:-7px; cursor:nwse-resize}
+    .handle.ne{right:-7px; top:-7px; cursor:nesw-resize}
+    .handle.sw{left:-7px; bottom:-7px; cursor:nesw-resize}
+    .handle.se{right:-7px; bottom:-7px; cursor:nwse-resize}
+
+    .stack{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:12px;
+    }
+
+    .two{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:12px;
+    }
+    @media(min-width:900px){
+      .two{grid-template-columns: 3fr 2fr}
+    }
+
+    .preview{
+      display:grid; gap:10px;
+    }
+    canvas{
+      width:100%; height:auto; background:#000; border-radius:10px; border:1px solid var(--outline);
+    }
+
+    .admin{
+      display:none;
+    }
+    .admin.open{display:block}
+
+    .logo-thumb{
+      display:inline-flex; align-items:center; gap:10px;
+      background:#0b0e16;
+      border:1px solid var(--outline);
+      border-radius:10px; padding:8px 10px;
+      max-width:100%;
+    }
+    .logo-thumb img{max-height:40px; max-width:200px}
+
+    .warn{color:var(--danger); font-weight:600}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="toolbar panel">
+      <div class="left">
+        <button class="toggle" id="toggleAdmin">Admin</button>
+        <span class="small"><- Choisissez le logo.</span>
+      </div>
+      <div class="right">
+        <button class="btn" id="fitToImage" disabled>Réinitialiser le cadre</button>
+        <button class="btn primary" id="makePreview" disabled>Prévisualizer</button>
+        <button class="btn ok" id="downloadBtn" disabled>Télécharger</button>
+      </div>
+    </div>
+
+    <div class="admin panel" id="adminPanel">
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:space-between">
+        <div class="logo-thumb">
+          <strong>Logo actuel:</strong>
+          <img id="logoPreview" alt="logo preview"/>
+          <span id="noLogoNote" class="small">Pas de logo choisi</span>
+        </div>
+        <label class="btn">
+          Choisir logo
+          <input id="logoInput" type="file" accept="image/*" style="display:none">
+        </label>
+        <button class="btn" id="clearLogo">Effacer logo</button>
+      </div>
+      <p class="small">Le logo sera utilisé sur les images fournis.</p>
+    </div>
+
+    <div class="two">
+      <div class="stack">
+        <div class="panel drop" id="dropZone">
+          <input id="fileInput" type="file" accept="image/*" />
+          <div class="hint">
+            Glissez un image ou 
+            <label for="fileInput" class="btn" style="margin-left:6px">choisir</label>
+          </div>
+          <div class="small" style="margin-top:6px">Supporte des images bitmap et fonctionne sans internet.</div>
+        </div>
+
+        <div class="stage panel" id="stage" aria-live="polite">
+          <div class="img-holder" id="imgHolder" style="display:none">
+            <img id="mainImg" alt="source" />
+            <div class="veil" id="veil"></div>
+            <div class="crop" id="cropBox" hidden>
+              <div class="handle nw" data-corner="nw"></div>
+              <div class="handle ne" data-corner="ne"></div>
+              <div class="handle sw" data-corner="sw"></div>
+              <div class="handle se" data-corner="se"></div>
+            </div>
+          </div>
+          <div id="emptyHint" class="small">Choisissez un image pour recadrer. Le cadre sera toujours carré.</div>
+        </div>
+      </div>
+
+      <div class="preview panel">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px">
+          <strong>preview</strong>
+          <span id="logoStatus" class="small"></span>
+        </div>
+        <canvas id="outCanvas" width="0" height="0" aria-label="preview canvas"></canvas>
+        <div class="small">Utilisez le bouton prévisualiser pour voir l'image cadré avec le logo. Téléchargez avec le bouton Télécharger.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* all comments are in lowercase as requested */
+
+    // basic element refs
+    const adminPanel = document.getElementById('adminPanel');
+    const toggleAdmin = document.getElementById('toggleAdmin');
+    const logoInput = document.getElementById('logoInput');
+    const clearLogoBtn = document.getElementById('clearLogo');
+    const logoPreview = document.getElementById('logoPreview');
+    const noLogoNote = document.getElementById('noLogoNote');
+    const logoStatus = document.getElementById('logoStatus');
+
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    const stage = document.getElementById('stage');
+    const imgHolder = document.getElementById('imgHolder');
+    const mainImg = document.getElementById('mainImg');
+    const cropBox = document.getElementById('cropBox');
+    const veil = document.getElementById('veil');
+
+    const fitToImageBtn = document.getElementById('fitToImage');
+    const makePreviewBtn = document.getElementById('makePreview');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const outCanvas = document.getElementById('outCanvas');
+    const emptyHint = document.getElementById('emptyHint');
+
+    // session logo storage key
+    const LOGO_KEY = 'session.logo.dataurl';
+
+    // state
+    let logoImg = null;               // htmlimageelement for logo
+    let imgLoaded = false;            // source image presence
+    let displayScale = 1;             // natural to displayed scale
+    let imgRect = {x:0,y:0,w:0,h:0};  // displayed image box inside holder
+    let crop = {x:0,y:0,size:0};      // crop in displayed pixels
+    let action = null;                // 'drag' or 'resize'
+    let activeCorner = null;          // which corner when resizing
+    let start = {x:0,y:0,crop:{}};
+
+    // admin panel toggle
+    toggleAdmin.addEventListener('click', () => {
+      adminPanel.classList.toggle('open');
+    });
+
+    // load previously saved logo from session storage
+    (function restoreLogo(){
+      const data = sessionStorage.getItem(LOGO_KEY);
+      if(data){
+        setLogoFromDataURL(data);
+      }else{
+        updateLogoUi(null);
+      }
+    })();
+
+    function setLogoFromDataURL(dataurl){
+      const img = new Image();
+      img.onload = () => {
+        logoImg = img;
+        updateLogoUi(img);
+        sessionStorage.setItem(LOGO_KEY, dataurl);
+      };
+      img.src = dataurl;
+    }
+
+    function updateLogoUi(img){
+      if(img){
+        logoPreview.src = img.src;
+        logoPreview.style.display = 'block';
+        noLogoNote.style.display = 'none';
+        logoStatus.textContent = 'logo prêt';
+      }else{
+        logoPreview.src = '';
+        logoPreview.style.display = 'none';
+        noLogoNote.style.display = 'inline';
+        logoStatus.textContent = 'no logo selected';
+      }
+    }
+
+    logoInput.addEventListener('change', (e)=>{
+      const f = e.target.files && e.target.files[0];
+      if(!f) return;
+      const reader = new FileReader();
+      reader.onload = ev => setLogoFromDataURL(ev.target.result);
+      reader.readAsDataURL(f);
+      // reset input so the same file can be chosen again if desired
+      e.target.value = '';
+    });
+
+    clearLogoBtn.addEventListener('click', ()=>{
+      sessionStorage.removeItem(LOGO_KEY);
+      logoImg = null;
+      updateLogoUi(null);
+    });
+
+    // file loading - drag and drop and input selection
+    ;['dragenter','dragover'].forEach(evt=>{
+      dropZone.addEventListener(evt, e=>{
+        e.preventDefault(); e.stopPropagation(); dropZone.classList.add('drag');
+      });
+    });
+    ;['dragleave','drop'].forEach(evt=>{
+      dropZone.addEventListener(evt, e=>{
+        e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('drag');
+      });
+    });
+    dropZone.addEventListener('drop', e=>{
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if(file) loadImageFile(file);
+    });
+    fileInput.addEventListener('change', e=>{
+      const file = e.target.files && e.target.files[0];
+      if(file) loadImageFile(file);
+      e.target.value = '';
+    });
+
+    function loadImageFile(file){
+      const reader = new FileReader();
+      reader.onload = ev => {
+        mainImg.onload = ()=> {
+          imgLoaded = true;
+          setupStageForImage();
+        };
+        mainImg.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // compute displayed image rect and init crop
+    function setupStageForImage(){
+      emptyHint.style.display = 'none';
+      imgHolder.style.display = 'inline-block';
+      cropBox.hidden = false;
+      fitToImageBtn.disabled = false;
+      makePreviewBtn.disabled = false;
+
+      // fit holder width to container, then size image to max width 100%
+      // we lock the holder to the natural aspect ratio by letting the img define it
+      // after the image lays out, compute exact rect
+      requestAnimationFrame(()=>{
+        const holderRect = imgHolder.getBoundingClientRect();
+        const imgRectDom = mainImg.getBoundingClientRect();
+
+        // compute the image box relative to holder
+        imgRect = {
+          x: imgRectDom.left - holderRect.left,
+          y: imgRectDom.top - holderRect.top,
+          w: imgRectDom.width,
+          h: imgRectDom.height
+        };
+
+        // scale factor from natural to displayed
+        displayScale = mainImg.naturalWidth / imgRect.w;
+
+        // initial crop is largest centered square inside the displayed image
+        const size = Math.min(imgRect.w, imgRect.h);
+        crop.size = size * 0.9; // start with 90 percent for nicer handles room
+        crop.x = imgRect.x + (imgRect.w - crop.size)/2;
+        crop.y = imgRect.y + (imgRect.h - crop.size)/2;
+
+        placeCropBox();
+        updateVeil();
+      });
+    }
+
+    function placeCropBox(){
+      cropBox.style.left = crop.x + 'px';
+      cropBox.style.top = crop.y + 'px';
+      cropBox.style.width = crop.size + 'px';
+      cropBox.style.height = crop.size + 'px';
+    }
+
+    function updateVeil(){
+      // carve a hole around the crop using clip-path on the veil pseudo element
+      const holderRect = imgHolder.getBoundingClientRect();
+      const x1 = (crop.x) / holderRect.width * 100;
+      const y1 = (crop.y) / holderRect.height * 100;
+      const x2 = (crop.x + crop.size) / holderRect.width * 100;
+      const y2 = (crop.y + crop.size) / holderRect.height * 100;
+
+      // build a polygon that draws the outer rect then the hole
+      const clip = `polygon(
+        0% 0%,
+        100% 0%,
+        100% 100%,
+        0% 100%,
+        0% 0%,
+        ${x1}% ${y1}%,
+        ${x2}% ${y1}%,
+        ${x2}% ${y2}%,
+        ${x1}% ${y2}%,
+        ${x1}% ${y1}%
+      )`;
+      veil.style.setProperty('--clip', clip);
+      veil.style.setProperty('clip-path', clip);
+      veil.style.pointerEvents = 'none';
+    }
+
+    // events for dragging and resizing the crop
+    function pointerDown(e){
+      if(!imgLoaded) return;
+      const target = e.target;
+      const isHandle = target.classList.contains('handle');
+      action = isHandle ? 'resize' : 'drag';
+      activeCorner = isHandle ? target.dataset.corner : null;
+
+      const pt = getPoint(e);
+      start.x = pt.x; start.y = pt.y;
+      start.crop = {...crop};
+
+      // capture pointer moves on document for robustness
+      document.addEventListener('pointermove', pointerMove);
+      document.addEventListener('pointerup', pointerUp);
+      e.preventDefault();
+    }
+    function pointerMove(e){
+      const pt = getPoint(e);
+      const dx = pt.x - start.x;
+      const dy = pt.y - start.y;
+
+      if(action === 'drag'){
+        crop.x = clamp(start.crop.x + dx, imgRect.x, imgRect.x + imgRect.w - crop.size);
+        crop.y = clamp(start.crop.y + dy, imgRect.y, imgRect.y + imgRect.h - crop.size);
+      } else if(action === 'resize'){
+        // keep square ratio, grow or shrink based on corner vector
+        let delta = 0;
+        if(activeCorner === 'nw'){
+          delta = -Math.max(dx, dy);
+          let newSize = clamp(start.crop.size + delta, 40, Math.min(imgRect.w, imgRect.h));
+          // move x,y so the se corner stays in place
+          crop.size = boundSizeToImage(newSize, 'nw');
+        } else if(activeCorner === 'ne'){
+          delta = -Math.max(-dx, dy);
+          let newSize = clamp(start.crop.size + delta, 40, Math.min(imgRect.w, imgRect.h));
+          crop.size = boundSizeToImage(newSize, 'ne');
+        } else if(activeCorner === 'sw'){
+          delta = -Math.max(dx, -dy);
+          let newSize = clamp(start.crop.size + delta, 40, Math.min(imgRect.w, imgRect.h));
+          crop.size = boundSizeToImage(newSize, 'sw');
+        } else if(activeCorner === 'se'){
+          delta = Math.max(dx, dy);
+          let newSize = clamp(start.crop.size + delta, 40, Math.min(imgRect.w, imgRect.h));
+          crop.size = boundSizeToImage(newSize, 'se');
+        }
+      }
+
+      placeCropBox();
+      updateVeil();
+      e.preventDefault();
+    }
+    function pointerUp(){
+      document.removeEventListener('pointermove', pointerMove);
+      document.removeEventListener('pointerup', pointerUp);
+      action = null; activeCorner = null;
+    }
+
+    function getPoint(e){
+      const rect = imgHolder.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+
+    function clamp(v, min, max){ return Math.min(Math.max(v, min), max); }
+
+    function boundSizeToImage(newSize, corner){
+      // ensure the crop box stays within image after resizing
+      // start from original crop and recompute x,y based on corner and new size
+      const s = start.crop.size;
+      const diff = newSize - s;
+
+      let nx = start.crop.x;
+      let ny = start.crop.y;
+
+      if(corner === 'nw'){
+        nx = start.crop.x - diff;
+        ny = start.crop.y - diff;
+      } else if(corner === 'ne'){
+        nx = start.crop.x;
+        ny = start.crop.y - diff;
+      } else if(corner === 'sw'){
+        nx = start.crop.x - diff;
+        ny = start.crop.y;
+      } else if(corner === 'se'){
+        nx = start.crop.x;
+        ny = start.crop.y;
+      }
+
+      // clamp x,y so the square is fully inside image
+      nx = clamp(nx, imgRect.x, imgRect.x + imgRect.w - newSize);
+      ny = clamp(ny, imgRect.y, imgRect.y + imgRect.h - newSize);
+
+      crop.x = nx;
+      crop.y = ny;
+      return newSize;
+    }
+
+    cropBox.addEventListener('pointerdown', pointerDown);
+    // also allow starting resize by pressing on handles specifically
+    for(const h of cropBox.querySelectorAll('.handle')){
+      h.addEventListener('pointerdown', pointerDown);
+    }
+
+    // reset crop to centered largest square
+    fitToImageBtn.addEventListener('click', ()=>{
+      if(!imgLoaded) return;
+      const size = Math.min(imgRect.w, imgRect.h);
+      crop.size = size;
+      crop.x = imgRect.x + (imgRect.w - crop.size)/2;
+      crop.y = imgRect.y + (imgRect.h - crop.size)/2;
+      placeCropBox();
+      updateVeil();
+    });
+
+    // render preview with logo
+    makePreviewBtn.addEventListener('click', ()=>{
+      if(!imgLoaded) return;
+
+      // map displayed crop to natural image pixels
+      const sx = Math.round((crop.x - imgRect.x) * displayScale);
+      const sy = Math.round((crop.y - imgRect.y) * displayScale);
+      const sSize = Math.round(crop.size * displayScale);
+
+      // set output canvas to exact crop size
+      outCanvas.width = sSize;
+      outCanvas.height = sSize;
+
+      const ctx = outCanvas.getContext('2d');
+      ctx.clearRect(0,0,outCanvas.width,outCanvas.height);
+
+      // draw the cropped image region
+      ctx.drawImage(
+        mainImg,
+        sx, sy, sSize, sSize,
+        0, 0, sSize, sSize
+      );
+
+      // draw logo if available
+      if(logoImg){
+        const targetW = Math.round(outCanvas.width * 0.17); // 10 percent of width
+        const scale = targetW / logoImg.naturalWidth;
+        const targetH = Math.round(logoImg.naturalHeight * scale);
+
+        const marginLeft = Math.round(outCanvas.width * 0.02); // 2 percent from left
+        const x = marginLeft;
+        const y = outCanvas.height - targetH; // bottom touches border
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(logoImg, x, y, targetW, targetH);
+      }
+
+      downloadBtn.disabled = false;
+    });
+
+    // download the canvas as png
+    downloadBtn.addEventListener('click', ()=>{
+      if(outCanvas.width === 0) return;
+      const link = document.createElement('a');
+      link.download = 'cropped_with_logo.png';
+      link.href = outCanvas.toDataURL('image/png');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    });
+
+    // maintain accurate image rect if the container size changes after load
+    // here we remeasure when the window resizes
+    window.addEventListener('resize', ()=>{
+      if(!imgLoaded) return;
+      const holderRect = imgHolder.getBoundingClientRect();
+      const imgRectDom = mainImg.getBoundingClientRect();
+
+      // keep crop relative to the image by using normalized coordinates
+      const nx = (crop.x - imgRect.x) / imgRect.w;
+      const ny = (crop.y - imgRect.y) / imgRect.h;
+      const ns = crop.size / imgRect.w; // size relative to width
+
+      imgRect = {
+        x: imgRectDom.left - holderRect.left,
+        y: imgRectDom.top - holderRect.top,
+        w: imgRectDom.width,
+        h: imgRectDom.height
+      };
+      displayScale = mainImg.naturalWidth / imgRect.w;
+
+      const sizePx = ns * imgRect.w;
+      crop.size = clamp(sizePx, 40, Math.min(imgRect.w, imgRect.h));
+      crop.x = imgRect.x + nx * imgRect.w;
+      crop.y = imgRect.y + ny * imgRect.h;
+
+      // ensure still inside
+      crop.x = clamp(crop.x, imgRect.x, imgRect.x + imgRect.w - crop.size);
+      crop.y = clamp(crop.y, imgRect.y, imgRect.y + imgRect.h - crop.size);
+
+      placeCropBox();
+      updateVeil();
+    });
+
+    // initial veil clip so it does not flash weirdly
+    updateVeil();
+  </script>
+</body>
+</html>

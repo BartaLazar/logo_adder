@@ -222,7 +222,7 @@
           <div class="hint"> 
             <label for="fileInput" class="btn" style="margin-left:6px">Choisir une image</label>
           </div>
-          <div class="small" style="margin-top:6px"><br>Supporte des images bitmap et fonctionne sans internet.</div>
+          <div class="small" style="margin-top:6px">Supporte des images bitmap et fonctionne sans internet.</div>
         </div>
 
         <div class="stage panel" id="stage" aria-live="polite">
@@ -236,17 +236,17 @@
               <div class="handle se" data-corner="se"></div>
             </div>
           </div>
-          <div id="emptyHint" class="small">Choisissez un image pour recadrer. Le cadre sera toujours carré.</div>
+          <div id="emptyHint" class="small">Choisissez une image pour recadrer. Le cadre sera toujours carré.</div>
         </div>
       </div>
 
       <div class="preview panel">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px">
-          <strong>preview</strong>
+          <strong>l'aperçu s'affichera ici</strong>
           <span id="logoStatus" class="small"></span>
         </div>
         <canvas id="outCanvas" width="0" height="0" aria-label="preview canvas"></canvas>
-        <div class="small">Utilisez le bouton prévisualiser pour voir l'image cadré avec le logo. Téléchargez avec le bouton Télécharger.<br><br>Créé par Lazar Barta pour le Club de l'Aviron Nyon</div>
+        <div class="small">Utilisez le bouton prévisualiser pour voir l'image cadrée avec le logo. Téléchargez avec le bouton Télécharger.<br><br>Créé par Lazar Barta pour le Club de l'Aviron Nyon</div>
       </div>
     </div>
   </div>
@@ -326,7 +326,7 @@
         logoPreview.src = '';
         logoPreview.style.display = 'none';
         noLogoNote.style.display = 'inline';
-        logoStatus.textContent = 'no logo selected';
+        logoStatus.textContent = 'pas de logo sélectionné';
       }
     }
 
